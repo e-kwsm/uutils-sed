@@ -81,27 +81,27 @@ fn generate_sed_script(rng: &mut ThreadRng) -> String {
             // Append: [addr]a\text
             let text = generate_random_string(rng.random_range(1..10));
             if rng.random_bool(0.3) {
-                format!("{}a\\{}", generate_address(rng), text)
+                format!("{}a\\\n{}", generate_address(rng), text)
             } else {
-                format!("a\\{text}")
+                format!("a\\\n{text}")
             }
         }
         "i\\" => {
             // Insert: [addr]i\text
             let text = generate_random_string(rng.random_range(1..10));
             if rng.random_bool(0.3) {
-                format!("{}i\\{}", generate_address(rng), text)
+                format!("{}i\\\n{}", generate_address(rng), text)
             } else {
-                format!("i\\{text}")
+                format!("i\\\n{text}")
             }
         }
         "c\\" => {
             // Change: [addr]c\text
             let text = generate_random_string(rng.random_range(1..10));
             if rng.random_bool(0.3) {
-                format!("{}c\\{}", generate_address(rng), text)
+                format!("{}c\\\n{}", generate_address(rng), text)
             } else {
-                format!("c\\{text}")
+                format!("c\\\n{text}")
             }
         }
         "=" => {
