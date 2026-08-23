@@ -15,16 +15,17 @@ and other extensions.
 ## Status
 
 At this state _sed_ implements all [POSIX features](https://pubs.opengroup.org/onlinepubs/9799919799/)
-and can run correctly the two complex scripts of its integration tests:
-[hanoi.sed](https://github.com/uutils/sed/blob/main/tests/fixtures/sed/script/hanoi.sed) (solves the Towers of Hanoi puzzle) and
+and can run correctly the three complex scripts of its integration tests:
+[hanoi.sed](https://github.com/uutils/sed/blob/main/tests/fixtures/sed/script/hanoi.sed) (solves the Towers of Hanoi puzzle),
+[mandelbrot.sed](https://github.com/uutils/sed/blob/main/tests/fixtures/sed/script/mandelbrot.sed), (draws the Mandelbrot set) and
 [math.sed](https://github.com/uutils/sed/blob/main/tests/fixtures/sed/script/math.sed)  (implements an arbitrary precision integer math calculator).
 
 The performance of this Rust implementation is now better than the GNU and FreeBSD implementations for most benchmarked cases.
 
 Further work aims to:
-* Adjust buffering on terminal output to match current implementations,
-* Implement more GNU extensions,
-* Improve performance where possible.
+* improve GNU _sed_ compatibility, especially on the regular expression front,
+* implement more GNU extensions, and
+* improve performance where possible.
 
 ## Installation and Use
 
