@@ -38,7 +38,18 @@ fn test_version() {
         .arg("--version")
         .succeeds()
         .no_stderr()
-        .stdout_is(short);
+        .stdout_is(&short);
+
+    assert!(short.contains("uutils"));
+}
+
+#[test]
+fn test_help_mentions_uutils() {
+    new_ucmd!()
+        .arg("--help")
+        .succeeds()
+        .no_stderr()
+        .stdout_contains("part of uutils");
 }
 
 #[test]
@@ -1223,6 +1234,47 @@ fn test_quit_now_exit_code() {
         .stdout_is_fixture("output/pattern_quit");
 }
 
+// Test for delete command preventing automatic pattern printing
+#[test]
+fn test_delete_command_prevents_automatic_printing() {
+    // Test 'd' command - delete line 2
+    new_ucmd!()
+        .args(&["2d"])
+        .pipe_in("line1\nline2\nline3")
+        .succeeds()
+        .stdout_is("line1\nline3");
+}
+
+#[test]
+fn test_delete_range_prevents_automatic_printing() {
+    // Test 'd' command on range - delete lines 2-3
+    new_ucmd!()
+        .args(&["2,3d"])
+        .pipe_in("line1\nline2\nline3\nline4")
+        .succeeds()
+        .stdout_is("line1\nline4");
+}
+
+#[test]
+fn test_change_command_prevents_automatic_printing() {
+    // Test 'c' command - change line 2
+    new_ucmd!()
+        .args(&["2c\\replaced"])
+        .pipe_in("line1\nline2\nline3")
+        .succeeds()
+        .stdout_is("line1\nreplaced\nline3");
+}
+
+#[test]
+fn test_uppercase_delete_prevents_automatic_printing() {
+    // Test 'D' command - delete up to newline and restart
+    new_ucmd!()
+        .args(&["-e", "N", "-e", "D"])
+        .pipe_in("line1\nline2\nline3")
+        .succeeds()
+        .stdout_is("line3\n");
+}
+
 ////////////////////////////////////////////////////////////
 // Command blocks: {}
 check_output!(
@@ -1414,6 +1466,59 @@ tb"#,
     ]
 );
 
+// T branches when NO substitution was made (inverse of t).
+// Lines not ending in "2" leave s/2$/X/ with no match, so T branches to
+// :skip and keeps the original line; lines ending in "2" fall through and
+// get the "SUB " mark.
+check_output!(
+    branch_no_sub_simple,
+    [
+        "-n",
+        "-e",
+        r#"
+s/2$/X/
+Tskip
+s/^/SUB /
+:skip
+p
+"#,
+        LINES1
+    ]
+);
+
+// Check that T also clears the substitution-done flag, matching t.
+// After s/// sets the flag, the first T sees a substitution so it does
+// not branch but still clears the flag; the second T then sees no
+// substitution and branches to :y. Reaching :y (CLEARED) rather than
+// falling through to :x (NOTCLEARED) proves the first T cleared the flag.
+check_output!(
+    branch_no_sub_clears,
+    [
+        "-n",
+        "-e",
+        r#"
+s/^/^/
+Tx
+Ty
+:x
+s/^/NOTCLEARED /p
+b
+:y
+s/^/CLEARED /p
+"#,
+        LINES1
+    ]
+);
+
+#[test]
+fn test_branch_no_sub_non_posix() {
+    new_ucmd!()
+        .args(&["--posix", "T"])
+        .fails()
+        .code_is(1)
+        .stderr_contains("invalid command code");
+}
+
 ////////////////////////////////////////////////////////////
 // Text: a, c, i
 
@@ -1582,7 +1687,7 @@ check_output!(
 );
 
 ////////////////////////////////////////////////////////////
-// r, w commands
+// r, w, W commands
 check_output!(read_ok, [format!("4r {LINES2}"), LINES1.to_string()]);
 check_output!(read_missing, ["5r /xyzzyxyzy42", LINES1]);
 check_output!(read_empty, ["6r input/empty", LINES1]);
@@ -1638,6 +1743,23 @@ fn sandbox_rejects_write_command() -> std::io::Result<()> {
 }
 
 #[test]
+fn sandbox_rejects_first_line_write_command() -> std::io::Result<()> {
+    let temp = NamedTempFile::new()?;
+    let cmd = format!("W {}", temp.path().display());
+
+    new_ucmd!()
+        .args(&["--sandbox", &cmd, LINES1])
+        .fails()
+        .stderr_contains("command not allowed with --sandbox");
+
+    let mut actual = String::new();
+    temp.reopen()?.read_to_string(&mut actual)?;
+    assert!(actual.is_empty());
+
+    Ok(())
+}
+
+#[test]
 fn write_single_file() -> std::io::Result<()> {
     let temp = NamedTempFile::new()?;
     let cmd = format!("3,12w {}", temp.path().display());
@@ -1649,6 +1771,23 @@ fn write_single_file() -> std::io::Result<()> {
 
     let expected = fs::read_to_string("tests/fixtures/sed/output/write_single_file")?;
     assert_eq!(actual, expected, "Output did not match fixture");
+
+    Ok(())
+}
+
+#[test]
+fn write_single_file_no_newline() -> std::io::Result<()> {
+    let temp = NamedTempFile::new()?;
+    let cmd = format!("w {}", temp.path().display());
+
+    new_ucmd!()
+        .args(&[cmd.as_str(), "input/no-new-line.txt"])
+        .succeeds();
+
+    let mut actual = String::new();
+    temp.reopen()?.read_to_string(&mut actual)?;
+
+    assert_eq!(actual, "Hello", "Output did not match expected");
 
     Ok(())
 }
@@ -1680,8 +1819,51 @@ fn write_two_files() -> std::io::Result<()> {
     Ok(())
 }
 
+#[test]
+fn write_first_line_newline() -> std::io::Result<()> {
+    let temp = NamedTempFile::new()?;
+    let cmd = format!("N;W {}", temp.path().display());
+
+    new_ucmd!()
+        .args(&["-n", "-e", &cmd])
+        .pipe_in("abc\ndef\n")
+        .succeeds();
+
+    let mut actual = String::new();
+    temp.reopen()?.read_to_string(&mut actual)?;
+    assert_eq!(actual, "abc\n");
+
+    Ok(())
+}
+
+#[test]
+fn write_first_line_no_newline() -> std::io::Result<()> {
+    let temp = NamedTempFile::new()?;
+    let cmd = format!("W {}", temp.path().display());
+
+    new_ucmd!()
+        .args(&["-n", "-e", &cmd])
+        .pipe_in("abc")
+        .succeeds();
+
+    let mut actual = String::new();
+    temp.reopen()?.read_to_string(&mut actual)?;
+    assert_eq!(actual, "abc");
+
+    Ok(())
+}
+
+#[test]
+fn write_first_line_with_w_command_is_non_posix() {
+    new_ucmd!()
+        .args(&["--posix", "W /tmp/out"])
+        .fails()
+        .code_is(1)
+        .stderr_is("sed: <script argument 1>:1:1: error: invalid command code `W'\n");
+}
+
 ////////////////////////////////////////////////////////////
-// =, l commands
+// =, l, F commands
 check_output!(number_continuous, ["/l2_/=", LINES1, LINES2]);
 check_output!(number_separate, ["-s", "/l._8/=", LINES1, LINES2]);
 check_output!(number_range, ["-e", "10,12=", LINES1]);
@@ -1690,14 +1872,51 @@ check_output!(number_range_out_of_bounds, ["-e", "47,60=", LINES1]);
 check_output!(list_ascii, ["-n", "l 60", "input/ascii"]);
 check_output!(list_empty, ["-n", "l 60", "input/empty"]);
 
-/// List Unicode input under an explicit UTF-8 locale.
+check_output!(filename_file, ["-n", r"F", LINES1]);
+// Non-ASCII filename
+check_output!(filename_αρχείο1, [r"F", "input/αρχείο1"]);
+
+#[test]
+fn filename_stdin() {
+    new_ucmd!()
+        .args(&["-n", "F"])
+        .pipe_in("a\nb\n")
+        .succeeds()
+        .stdout_is("-\n-\n");
+}
+
+#[test]
+fn filename_non_posix() {
+    new_ucmd!()
+        .args(&["--posix", "F"])
+        .fails()
+        .code_is(1)
+        .stderr_contains("invalid command code");
+}
+
+/// List Unicode input under an explicit UTF-8 locale
+/// with uutil extensions enabled.
 #[test]
 fn list_unicode() {
     new_ucmd!()
         .env("LC_ALL", "C.UTF-8")
-        .args(&["l 60", "input/unicode"])
+        .args(&["--uutil-extensions", "l 60", "input/unicode"])
         .succeeds()
         .stdout_is_fixture_bytes("output/list_unicode");
+}
+
+// List Unicode input without uutil extensions should generate octal bytes.
+check_output!(list_unicode_octal, ["l 60", "input/unicode"]);
+
+/// List Unicode input without uutil extensions should generate octal bytes,
+/// even under an explicit UTF-8 locale.
+#[test]
+fn list_unicode_octal_env() {
+    new_ucmd!()
+        .env("LC_ALL", "C.UTF-8")
+        .args(&["l 60", "input/unicode"])
+        .succeeds()
+        .stdout_is_fixture_bytes("output/list_unicode_octal");
 }
 
 /// List invalid UTF-8 bytes without decoding in byte mode.
@@ -1715,23 +1934,16 @@ fn list_invalid_utf8_byte_locale() {
 // In-place editing
 #[test]
 fn in_place_edit_replace() -> std::io::Result<()> {
-    let mut temp = NamedTempFile::new()?;
-    writeln!(temp.as_file_mut(), "hello, world")?;
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("input");
 
-    // Get the file path before converting to TempPath
-    let path = temp.path().to_path_buf();
+    std::fs::write(&path, "hello, world\n")?;
 
-    // Close temp file and preserve path
-    let temp_path = temp.into_temp_path();
-
-    // Call your tool on the path
     new_ucmd!()
         .args(&["-i", "-e", "s/world/universe/", path.to_str().unwrap()])
         .succeeds();
 
-    // Read the file using standard fs
     let actual = std::fs::read_to_string(&path)?;
-    temp_path.close()?; // Clean up
 
     assert_eq!(actual, "hello, universe\n");
     Ok(())
@@ -1739,13 +1951,11 @@ fn in_place_edit_replace() -> std::io::Result<()> {
 
 #[test]
 fn in_place_edit_backup() -> std::io::Result<()> {
-    let mut temp = NamedTempFile::new()?;
-    writeln!(temp.as_file_mut(), "hello, world")?;
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("input");
 
-    let path = temp.path().to_path_buf();
-    let temp_path = temp.into_temp_path();
+    std::fs::write(&path, b"hello, world\n")?;
 
-    // Run the sed-like command with -i (in-place edit)
     new_ucmd!()
         .args(&[
             "-i",
@@ -1767,9 +1977,6 @@ fn in_place_edit_backup() -> std::io::Result<()> {
     ));
     let backup = std::fs::read_to_string(&backup_path)?;
     assert_eq!(backup, "hello, world\n");
-
-    temp_path.close()?; // Cleanup
-    std::fs::remove_file(backup_path)?; // Cleanup backup
 
     Ok(())
 }

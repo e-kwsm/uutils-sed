@@ -15,21 +15,29 @@ and other extensions.
 ## Status
 
 At this state _sed_ implements all [POSIX features](https://pubs.opengroup.org/onlinepubs/9799919799/)
-and can run correctly the two complex scripts of its integration tests:
-[hanoi.sed](https://github.com/uutils/sed/blob/main/tests/fixtures/sed/script/hanoi.sed) (solves the Towers of Hanoi puzzle) and
+and can run correctly the three complex scripts of its integration tests:
+[hanoi.sed](https://github.com/uutils/sed/blob/main/tests/fixtures/sed/script/hanoi.sed) (solves the Towers of Hanoi puzzle),
+[mandelbrot.sed](https://github.com/uutils/sed/blob/main/tests/fixtures/sed/script/mandelbrot.sed), (draws the Mandelbrot set) and
 [math.sed](https://github.com/uutils/sed/blob/main/tests/fixtures/sed/script/math.sed)  (implements an arbitrary precision integer math calculator).
 
 The performance of this Rust implementation is now better than the GNU and FreeBSD implementations for most benchmarked cases.
 
 Further work aims to:
-* Adjust buffering on terminal output to match current implementations,
-* Implement more GNU extensions,
-* Improve performance where possible.
+* improve GNU _sed_ compatibility, especially on the regular expression front,
+* implement more GNU extensions, and
+* improve performance where possible.
 
 ## Installation and Use
 
 We provide a Linux x86_64 binary archive from the main branch at
 https://github.com/uutils/sed/releases/tag/latest-commit .
+
+If you have [cargo-binstall](https://github.com/cargo-bins/cargo-binstall),
+the released binaries can be installed directly with:
+
+```bash
+cargo binstall sed
+```
 
 For other platforms, ensure you have Rust installed on your system. You can install Rust through [rustup](https://rustup.rs/).
 
@@ -94,8 +102,10 @@ cargo test
   in the specified text.
 * The `a`, `i`, `=`, `l`, `q` and `r` commands support address range as an extension to POSIX.
 * The substitution command replacement group `\0` is a synonym for &.
+* An `F` command outputs the name of the file currently being processed.
 * A `Q` command (optionally followed by an exit code) quits immediately.
 * The `q` command can be optionally followed by an exit code.
+* A `W` command writes to a file the pattern's first line.
 * The `l` command can be optionally followed by the output width.
 * The `--follow-symlinks` option for in-place editing.
 * The `--sandbox` option that limits potentially destructive commands.
@@ -112,8 +122,13 @@ cargo test
 ### New extensions
 * Unicode characters can be specified in regular expression pattern, replacement
   and transliteration sequences using `\uXXXX` or `\UXXXXXXXX` sequences.
+
+### Incompatible extensions
+The `-U` or `--uutil-extensions` option enables useful extensions or bug fixes
+that aren't compatible with GNU sed or POSIX.
+
 * The `l` command lists Unicode characters using the `\uXXXX` and `\UXXXXXXXX`
-  sequences.
+  escapes rather than as octal UTF-8 byte sequences.
 
 ### Incompatibilities
 * Similarly to GNU _sed_, input is processed as raw bytes or as valid UTF-8

@@ -38,10 +38,11 @@ pub struct ProcessingContext {
     pub sandbox: bool,
     pub unbuffered: bool,
     pub null_data: bool,
+    pub uutil_extensions: bool,
 
     // Other context
-    /// Currently processed input file name (not script) in quoted form
-    pub input_name: String,
+    /// Currently processed input file name (not script)
+    pub input_name: PathBuf,
     /// Current input line number
     pub line_number: usize,
     /// True if this is the last address of a range
@@ -255,12 +256,12 @@ impl Default for Transliteration {
     /// Create a new Transliteration with identity mapping for the fast-path.
     fn default() -> Self {
         let mut fast = [0u8; 256];
-        for (i, slot) in fast.iter_mut().enumerate() {
-            *slot = i as u8;
+        for (slot, value) in fast.iter_mut().zip(0..=u8::MAX) {
+            *slot = value;
         }
         let mut unicode_fast = ['\0'; COMMON_UNICODE];
-        for (i, slot) in unicode_fast.iter_mut().enumerate() {
-            *slot = char::from_u32(i as u32).unwrap_or('\0');
+        for (slot, cp) in unicode_fast.iter_mut().zip(0u32..) {
+            *slot = char::from_u32(cp).unwrap_or('\0');
         }
         Self {
             byte_fast: fast,
@@ -361,11 +362,11 @@ impl Command {
 
 #[derive(Debug)]
 /// Command-specific data
-/// After parsing, t, b Label elements are converted into BranchTarget ones.
+/// After parsing, t, T, b Label elements are converted into BranchTarget ones.
 pub enum CommandData {
     None,
-    BranchTarget(Option<Rc<RefCell<Command>>>), // Commands for 'b', 't', '{'
-    Label(Option<String>),                      // Label name for 'b', 't', ':'
+    BranchTarget(Option<Rc<RefCell<Command>>>), // Commands for 'b', 't', 'T', '{'
+    Label(Option<String>),                      // Label name for 'b', 't', 'T', ':'
     Path(PathBuf),                              // File path for 'r'
     NamedWriter(Rc<RefCell<NamedWriter>>),      // File output for 'w'
     Number(usize),                              // Number for 'l', 'q', 'Q' (GNU)
@@ -593,7 +594,7 @@ mod tests {
     fn test_all_fast_path_mapped_to_space() {
         let mut t = Transliteration::default();
         for cp in 0..COMMON_UNICODE {
-            if let Some(ch) = char::from_u32(cp as u32) {
+            if let Some(ch) = u32::try_from(cp).ok().and_then(char::from_u32) {
                 t.insert(ch, ' ');
             }
         }

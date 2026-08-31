@@ -24,15 +24,16 @@ use crate::sed::command::{ByteSpace, CharacterMode, ProcessingContext};
 use crate::sed::compiler::compile;
 use crate::sed::processor::process_all_files;
 use crate::sed::script_line_provider::ScriptValue;
-use clap::{Arg, ArgMatches, Command, arg, crate_version};
+use clap::{Arg, ArgMatches, Command, arg};
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use uucore::error::{UResult, USimpleError, UUsageError};
 use uucore::format_usage;
 
-const ABOUT: &str = "Stream editor for filtering and transforming text";
+const ABOUT: &str = "Stream editor for filtering and transforming text (part of uutils)";
 const USAGE: &str = "sed [OPTION]... [script] [file]...";
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (uutils)");
 
 #[uucore::main]
 pub fn uumain(args: impl uucore::Args) -> UResult<()> {
@@ -62,7 +63,7 @@ pub fn uu_app() -> Command {
     let util_name = uucore::util_name();
 
     Command::new(util_name)
-        .version(crate_version!())
+        .version(VERSION)
         .about(ABOUT)
         .override_usage(format_usage(USAGE))
         .args_override_self(true)
@@ -113,6 +114,11 @@ pub fn uu_app() -> Command {
             arg!(-s --separate "Consider files as separate rather than as a long stream."),
             arg!(--sandbox "Operate in a sandbox by disabling e/r/w commands."),
             arg!(-u --unbuffered "Load minimal input data and flush output buffers regularly."),
+            Arg::new("uutil-extensions")
+                .short('U')
+                .long("uutil-extensions")
+                .help("Enable incompatible extensions.")
+                .action(clap::ArgAction::SetTrue),
             Arg::new("null-data")
                 .short('z')
                 .long("null-data")
@@ -242,12 +248,13 @@ fn build_context(matches: &ArgMatches) -> UResult<ProcessingContext> {
         sandbox: matches.get_flag("sandbox"),
         unbuffered: matches.get_flag("unbuffered"),
         null_data: matches.get_flag("null-data"),
+        uutil_extensions: matches.get_flag("uutil-extensions"),
 
         // Environment
         character_mode: character_mode_for_locale(&locale)?,
 
         // Other context
-        input_name: "<stdin>".to_string(),
+        input_name: PathBuf::from("-"),
         line_number: 0,
         last_address: false,
         last_line: false,
@@ -388,6 +395,7 @@ mod tests {
         assert!(!ctx.sandbox);
         assert!(!ctx.unbuffered);
         assert!(!ctx.null_data);
+        assert!(!ctx.uutil_extensions);
     }
 
     #[test]
@@ -405,6 +413,7 @@ mod tests {
             "-s",
             "--sandbox",
             "-u",
+            "-U",
             "-z",
         ]);
 
@@ -423,6 +432,7 @@ mod tests {
         assert!(ctx.sandbox);
         assert!(ctx.unbuffered);
         assert!(ctx.null_data);
+        assert!(ctx.uutil_extensions);
     }
 
     #[test]

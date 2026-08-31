@@ -397,7 +397,9 @@ fn substitute(
 
         // Write to file if needed.
         if let Some(ref writer) = sub.write_file {
-            writer.borrow_mut().write_line_bytes(pattern.as_bytes())?;
+            writer
+                .borrow_mut()
+                .write_line_bytes(pattern.as_bytes(), pattern.is_newline_terminated())?;
         }
         context.substitution_made = true;
     }
@@ -573,7 +575,8 @@ fn list(
 
     let mut list_line = ListLine::new(max_width);
 
-    if context.character_mode == CharacterMode::Byte {
+    if !context.uutil_extensions || context.character_mode == CharacterMode::Byte {
+        // List non-ASCII bytes in octal.
         for &byte in line.as_bytes() {
             if byte == b'\n' {
                 list_line.write_embedded_newline(output)?;
@@ -583,6 +586,7 @@ fn list(
             list_line.write_item(output, &out_str)?;
         }
     } else {
+        // List non-ASCII 8-bit characters in octal; Unicode in hex \u or \U.
         let line = line.as_str().map_err(|e| {
             input_runtime_error::<()>(
                 location,
@@ -737,6 +741,12 @@ fn process_file(
                     }
                     _ => panic!("invalid 'e' command data"),
                 },
+                'F' => {
+                    // Output current input file name.
+                    let mut bytes = context.input_name.as_os_str().as_encoded_bytes().to_vec();
+                    bytes.push(b'\n');
+                    output.write_bytes(&bytes)?;
+                }
                 'g' => {
                     // Replace pattern with the contents of the hold space.
                     pattern.set_to_bytes(context.hold.content.clone(), context.hold.has_newline);
@@ -796,13 +806,17 @@ fn process_file(
                 }
                 'q' => {
                     // Quit after printing the pattern space.
-                    set_exit_code(*extract_variant!(command, Number) as i32);
+                    set_exit_code(
+                        i32::try_from(*extract_variant!(command, Number)).unwrap_or(i32::MAX),
+                    );
                     context.stop_processing = true;
                     break;
                 }
                 'Q' => {
                     // Quit immediatelly.
-                    set_exit_code(*extract_variant!(command, Number) as i32);
+                    set_exit_code(
+                        i32::try_from(*extract_variant!(command, Number)).unwrap_or(i32::MAX),
+                    );
                     context.stop_processing = true;
                     context.quiet = true;
                     break;
@@ -831,10 +845,44 @@ fn process_file(
                     // Branch to the end of the script.
                     break;
                 }
+                'T' if context.substitution_made => {
+                    // A substitution was made since the last cycle or T,
+                    // so reset the flag and fall through without branching.
+                    context.substitution_made = false;
+                }
+                'T' => {
+                    // Branch to the specified label or end if none is given
+                    // if no substitution was made since last cycle or T.
+                    let target = extract_variant!(command, BranchTarget);
+                    if target.is_some() {
+                        // New command to execute
+                        current.clone_from(target);
+                        continue;
+                    }
+                    // Branch to the end of the script.
+                    break;
+                }
                 'w' => {
                     // Append the pattern space to the specified file.
                     let writer = extract_variant!(command, NamedWriter);
-                    writer.borrow_mut().write_line_bytes(pattern.as_bytes())?;
+                    writer
+                        .borrow_mut()
+                        .write_line_bytes(pattern.as_bytes(), pattern.is_newline_terminated())?;
+                }
+                'W' => {
+                    // Append only the first line of the pattern space.
+                    let writer = extract_variant!(command, NamedWriter);
+                    let pattern_bytes = pattern.as_bytes();
+                    let (first_line, found_newline) =
+                        match pattern_bytes.iter().position(|&b| b == b'\n') {
+                            // A slice including the newline
+                            Some(pos) => (&pattern_bytes[..=pos], true),
+                            None => (pattern_bytes, false),
+                        };
+                    writer.borrow_mut().write_line_bytes(
+                        first_line,
+                        !found_newline && pattern.is_newline_terminated(),
+                    )?;
                 }
                 'x' => {
                     // Exchange the contents of the pattern and hold spaces.
@@ -924,11 +972,11 @@ pub fn process_all_files(
     let mut in_place = InPlace::new(context.clone());
     let last_file_index = files.len() - 1;
 
-    for (index, path) in files.iter().enumerate() {
+    for (index, path) in files.into_iter().enumerate() {
         context.last_file = index == last_file_index;
-        let mut reader = LineReader::open(path)
+        let mut reader = LineReader::open(&path)
             .map_err_context(|| format!("error opening input file {}", path.quote()))?;
-        let output = in_place.begin(path)?;
+        let output = in_place.begin(&path)?;
 
         if context.separate || index == 0 {
             context.line_number = 0;
@@ -939,7 +987,7 @@ pub fn process_all_files(
             context.hold.has_newline = true;
         }
 
-        context.input_name = path.quote().to_string();
+        context.input_name = path;
         process_file(commands.clone(), &mut reader, output, context)?;
 
         // Handle any N command remains.
